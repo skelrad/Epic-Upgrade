@@ -1,502 +1,297 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Project Planning Tool</title>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="UTF-8" />
+  <title>Project Planning Tool</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- React -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- SheetJS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-    <div id="root"></div>
-    
-    <script type="text/babel">
-        const { useState, useRef } = React;
 
-        const ProjectPlannerTool = () => {
-          const [step, setStep] = useState(1);
-          const [projectName, setProjectName] = useState('');
-          const [goLiveDate, setGoLiveDate] = useState('');
-          const [projectWeeks, setProjectWeeks] = useState(18);
-          const [tasks, setTasks] = useState([]);
-          const [calendarFilter, setCalendarFilter] = useState('all');
-          const fileInputRef = useRef(null);
+<body class="bg-gray-100">
+<div id="root"></div>
 
-          const taskTypes = ['Build', 'Testing', 'Training', 'Planning', 'Milestone'];
+<script type="text/babel">
+/* ============================================================
+   CONSTANTS
+============================================================ */
+const TASK_TYPES = ['Build', 'Testing', 'Training', 'Planning', 'Milestone'];
+const DURATION_UNITS = ['Days', 'Weeks'];
 
-          const calculateProjectStart = (goLive, weeks) => {
-            if (!goLive) return null;
-            const date = new Date(goLive);
-            let businessDays = (weeks * 5) - 1;
-            while (businessDays > 0) {
-              date.setDate(date.getDate() - 1);
-              if (date.getDay() !== 0 && date.getDay() !== 6) businessDays--;
-            }
-            while (date.getDay() !== 1) date.setDate(date.getDate() - 1);
-            return date;
-          };
+/* ============================================================
+   DATE UTILITIES (single source of truth)
+============================================================ */
+const isBusinessDay = d => d.getDay() !== 0 && d.getDay() !== 6;
 
-          const projectStartDate = calculateProjectStart(goLiveDate, projectWeeks);
+function calculateProjectStart(goLive, weeks) {
+  if (!goLive) return null;
+  const d = new Date(goLive);
+  let days = weeks * 5 - 1;
+  while (days > 0) {
+    d.setDate(d.getDate() - 1);
+    if (isBusinessDay(d)) days--;
+  }
+  while (d.getDay() !== 1) d.setDate(d.getDate() - 1);
+  return d;
+}
 
-          const getMondayOfWeek = (weekNum) => {
-            if (!projectStartDate) return null;
-            const date = new Date(projectStartDate);
-            let businessDays = (weekNum - 1) * 5;
-            while (businessDays > 0) {
-              date.setDate(date.getDate() + 1);
-              if (date.getDay() !== 0 && date.getDay() !== 6) businessDays--;
-            }
-            return date;
-          };
+function getMondayOfWeek(projectStart, week) {
+  if (!projectStart) return null;
+  const d = new Date(projectStart);
+  let days = (week - 1) * 5;
+  while (days > 0) {
+    d.setDate(d.getDate() + 1);
+    if (isBusinessDay(d)) days--;
+  }
+  return d;
+}
 
-          const calculateEndDate = (startDate, duration, durationType) => {
-            const date = new Date(startDate);
-            let daysToAdd = durationType === 'weeks' ? duration * 5 : duration;
-            let added = 0;
-            while (added < daysToAdd - 1) {
-              date.setDate(date.getDate() + 1);
-              if (date.getDay() !== 0 && date.getDay() !== 6) added++;
-            }
-            return date;
-          };
+function calculateEndDate(start, duration, unit) {
+  const d = new Date(start);
+  let days = unit === 'Weeks' ? duration * 5 : duration;
+  let added = 0;
+  while (added < days - 1) {
+    d.setDate(d.getDate() + 1);
+    if (isBusinessDay(d)) added++;
+  }
+  return d;
+}
 
-          const downloadTemplate = () => {
-            const templateData = [{
-              'Task Name': 'Example Task',
-              'Task Details': 'Description of the task',
-              'Start Week': 1,
-              'Duration': 2,
-              'Duration Type': 'weeks',
-              'Exact Date Required': 'No',
-              'Task Type': 'Build'
-            }];
-            const ws = XLSX.utils.json_to_sheet(templateData);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Tasks');
-            XLSX.writeFile(wb, 'project_planning_template.xlsx');
-          };
+/* ============================================================
+   EXCEL TEMPLATE (INTAKE)
+============================================================ */
+function downloadTemplate() {
+  const wb = XLSX.utils.book_new();
 
-          const handleFileUpload = (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-              const data = new Uint8Array(event.target.result);
-              const workbook = XLSX.read(data, { type: 'array' });
-              const sheet = workbook.Sheets[workbook.SheetNames[0]];
-              const jsonData = XLSX.utils.sheet_to_json(sheet);
-              const parsed = jsonData.map((row, i) => ({
-                id: `task-${Date.now()}-${i}`,
-                name: row['Task Name'] || '',
-                details: row['Task Details'] || '',
-                startWeek: parseInt(row['Start Week']) || 1,
-                duration: parseFloat(row['Duration']) || 1,
-                durationType: (row['Duration Type'] || 'weeks').toLowerCase(),
-                exactDateRequired: (row['Exact Date Required'] || '').toLowerCase() === 'yes',
-                taskType: row['Task Type'] || 'Build',
-                specificDate: null,
-                owner: '',
-                status: 'Not Started',
-                percentComplete: 0,
-                notes: ''
-              }));
-              setTasks(parsed);
-              setStep(3);
-            };
-            reader.readAsArrayBuffer(file);
-          };
+  const lists = XLSX.utils.aoa_to_sheet([
+    ['TaskTypes', ...TASK_TYPES],
+    ['DurationUnits', ...DURATION_UNITS],
+    ['YesNo', 'Yes', 'No']
+  ]);
+  lists['!hidden'] = 1;
+  XLSX.utils.book_append_sheet(wb, lists, 'Lists');
 
-          const addTask = () => setTasks([...tasks, {
-            id: `task-${Date.now()}`,
-            name: '',
-            details: '',
-            startWeek: 1,
-            duration: 1,
-            durationType: 'weeks',
-            exactDateRequired: false,
-            taskType: 'Build',
-            specificDate: null,
-            owner: '',
-            status: 'Not Started',
-            percentComplete: 0,
-            notes: ''
-          }]);
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['Project Planning Input Template'],
+    [],
+    ['Instructions:'],
+    ['• One task per row'],
+    ['• Do not rename columns'],
+    ['• Use dropdowns only'],
+    [],
+    [
+      'Task Name','Task Details','Start Week','Duration',
+      'Duration Unit','Exact Date Required','Specific Date',
+      'Task Type','Notes'
+    ]
+  ]);
 
-          const updateTask = (id, field, value) => {
-            setTasks(tasks.map(t => t.id === id ? { ...t, [field]: value } : t));
-          };
+  ws['!freeze'] = { ySplit: 8 };
+  ws['!cols'] = [
+    {wch:28},{wch:40},{wch:12},{wch:10},
+    {wch:14},{wch:20},{wch:14},{wch:16},{wch:30}
+  ];
 
-          const deleteTask = (id) => setTasks(tasks.filter(t => t.id !== id));
+  ws['!dataValidation'] = [
+    { type:'list', sqref:'E9:E500', formula1:'=Lists!$B$2:$C$2' },
+    { type:'list', sqref:'F9:F500', formula1:'=Lists!$B$3:$C$3' },
+    { type:'list', sqref:'H9:H500', formula1:'=Lists!$B$1:$F$1' }
+  ];
 
-          const saveProgress = () => {
-            const data = { projectName, goLiveDate, projectWeeks, tasks };
-            const jsonStr = JSON.stringify(data, null, 2);
-            const blob = new Blob([jsonStr], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${projectName || 'project'}_progress.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-          };
+  XLSX.utils.book_append_sheet(wb, ws, 'Tasks');
+  XLSX.writeFile(wb, 'project_tasks_template.xlsx');
+}
 
-          const loadProgress = (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-              try {
-                const data = JSON.parse(event.target.result);
-                setProjectName(data.projectName || '');
-                setGoLiveDate(data.goLiveDate || '');
-                setProjectWeeks(data.projectWeeks || 18);
-                setTasks(data.tasks || []);
-                setStep(4);
-              } catch {
-                alert('Error loading file. Please make sure it is a valid project file.');
-              }
-            };
-            reader.readAsText(file);
-          };
+/* ============================================================
+   EXCEL EXPORT (POLISHED TRACKER)
+============================================================ */
+function exportExcel({ projectName, goLiveDate, projectWeeks, tasks }) {
+  const wb = XLSX.utils.book_new();
+  const rows = [];
 
-          const groupTasksByWeek = () => {
-            const grouped = {};
-            tasks.forEach(t => {
-              if (!grouped[t.startWeek]) grouped[t.startWeek] = [];
-              grouped[t.startWeek].push(t);
-            });
-            Object.keys(grouped).forEach(w => {
-              grouped[w].sort((a, b) => {
-                const aStart = a.specificDate ? new Date(a.specificDate) : getMondayOfWeek(a.startWeek);
-                const bStart = b.specificDate ? new Date(b.specificDate) : getMondayOfWeek(b.startWeek);
-                return calculateEndDate(aStart, a.duration, a.durationType) - 
-                       calculateEndDate(bStart, b.duration, b.durationType);
-              });
-            });
-            return grouped;
-          };
+  const projectStart = calculateProjectStart(goLiveDate, projectWeeks);
 
-          const exportToExcel = () => {
-            const wb = XLSX.utils.book_new();
-            
-            const taskData = tasks.map(t => {
-              const start = t.specificDate ? new Date(t.specificDate) : getMondayOfWeek(t.startWeek);
-              const end = calculateEndDate(start, t.duration, t.durationType);
-              return {
-                'Week': `Week ${t.startWeek}`,
-                'Task Type': t.taskType,
-                'Task Name': t.name,
-                'Details': t.details,
-                'Start Date': start?.toLocaleDateString(),
-                'End Date': end?.toLocaleDateString(),
-                'Duration': `${t.duration} ${t.durationType}`,
-                'Owner': t.owner,
-                'Status': t.status,
-                '% Complete': t.percentComplete,
-                'Notes': t.notes
-              };
-            });
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(taskData), 'Task Tracker');
-            
-            const gantt = tasks.map(t => {
-              const start = t.specificDate ? new Date(t.specificDate) : getMondayOfWeek(t.startWeek);
-              const end = calculateEndDate(start, t.duration, t.durationType);
-              return {
-                'Task': t.name,
-                'Start': start?.toLocaleDateString(),
-                'End': end?.toLocaleDateString(),
-                'Type': t.taskType
-              };
-            });
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(gantt), 'Gantt Chart');
-            
-            XLSX.writeFile(wb, `${projectName || 'project'}_tracker.xlsx`);
-          };
+  rows.push(
+    ['Project Name', projectName || ''],
+    ['Go-Live Date', goLiveDate || ''],
+    ['Project Duration', `${projectWeeks} weeks`],
+    ['Project Start', projectStart?.toLocaleDateString() || ''],
+    [],
+  );
 
-          const renderCalendar = () => {
-            if (!projectStartDate || !goLiveDate) return null;
-            const months = [];
-            let current = new Date(projectStartDate.getFullYear(), projectStartDate.getMonth(), 1);
-            const end = new Date(goLiveDate);
-            while (current <= end) {
-              months.push(new Date(current));
-              current.setMonth(current.getMonth() + 1);
-            }
+  const weekMap = {};
+  tasks.forEach(t => {
+    const start = t.specificDate
+      ? new Date(t.specificDate)
+      : getMondayOfWeek(projectStart, t.startWeek);
+    const end = calculateEndDate(start, t.duration, t.durationUnit);
 
-            const filtered = calendarFilter === 'all' ? tasks : tasks.filter(t => t.taskType === calendarFilter);
+    if (!weekMap[t.startWeek]) weekMap[t.startWeek] = [];
+    weekMap[t.startWeek].push({ ...t, start, end });
+  });
 
-            return months.map(monthDate => {
-              const year = monthDate.getFullYear();
-              const month = monthDate.getMonth();
-              const firstDay = new Date(year, month, 1);
-              const lastDay = new Date(year, month + 1, 0);
-              const days = [];
-              for (let i = 0; i < firstDay.getDay(); i++) days.push(null);
-              for (let i = 1; i <= lastDay.getDate(); i++) days.push(new Date(year, month, i));
+  Object.keys(weekMap)
+    .sort((a,b)=>a-b)
+    .forEach(week => {
+      const ws = getMondayOfWeek(projectStart, Number(week));
+      const we = calculateEndDate(ws, 5, 'Days');
 
-              return (
-                <div key={month} className="mb-8 bg-white rounded-lg p-6 shadow-sm">
-                  <h3 className="text-lg font-semibold mb-4">
-                    {monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                  </h3>
-                  <div className="grid grid-cols-7 gap-1">
-                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-                      <div key={d} className="text-center text-xs font-semibold text-gray-600 p-2">{d}</div>
-                    ))}
-                    {days.map((day, i) => {
-                      const tasksOnDay = day ? filtered.filter(t => {
-                        const start = t.specificDate ? new Date(t.specificDate) : getMondayOfWeek(t.startWeek);
-                        const end = calculateEndDate(start, t.duration, t.durationType);
-                        return day >= start && day <= end;
-                      }) : [];
-                      return (
-                        <div key={i} className="border border-gray-200 min-h-20 p-1 bg-gray-50">
-                          {day && (
-                            <>
-                              <div className="text-xs font-medium mb-1">{day.getDate()}</div>
-                              {tasksOnDay.map((t, idx) => (
-                                <div key={idx} className="text-xs bg-blue-100 text-blue-800 px-1 py-0.5 rounded mb-1 truncate" 
-                                     title={t.name}>{t.name}</div>
-                              ))}
-                            </>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            });
-          };
+      rows.push([`WEEK ${week} (${ws.toLocaleDateString()} – ${we.toLocaleDateString()})`]);
+      rows.push(['Task','Type','Start','End','Duration','% Complete','Notes']);
 
-          return (
-            <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
-              <div className="max-w-7xl mx-auto">
-                <div className="bg-white rounded-xl shadow-lg p-8 mb-6">
-                  <div className="flex items-center justify-between mb-8">
-                    <h1 className="text-4xl font-bold text-gray-900">Project Planning Tool</h1>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-gray-600">Step {step} of 6</span>
-                      {step > 2 && (
-                        <button onClick={saveProgress} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                          💾 Save Progress
-                        </button>
-                      )}
-                    </div>
-                  </div>
+      weekMap[week]
+        .sort((a,b)=>a.start-b.start || a.end-b.end)
+        .forEach(t=>{
+          rows.push([
+            t.name,
+            t.taskType,
+            t.start.toLocaleDateString(),
+            t.end.toLocaleDateString(),
+            `${t.duration} ${t.durationUnit}`,
+            t.percentComplete,
+            t.notes
+          ]);
+        });
 
-                  {step === 1 && (
-                    <div className="space-y-6">
-                      <h2 className="text-2xl font-bold text-gray-800">Getting Started</h2>
-                      <p className="text-gray-600">This tool guides you through creating a comprehensive project plan.</p>
-                      <ol className="list-decimal list-inside space-y-2 text-gray-600 ml-4">
-                        <li>Download the task template spreadsheet</li>
-                        <li>Fill in your project tasks</li>
-                        <li>Upload the completed spreadsheet</li>
-                        <li>Configure dates and review tasks</li>
-                        <li>Generate visualizations and export</li>
-                      </ol>
-                      <div className="bg-blue-50 p-4 rounded-lg">
-                        <h4 className="font-semibold text-blue-900 mb-2">Template Columns:</h4>
-                        <ul className="text-sm text-blue-800 space-y-1">
-                          <li><strong>Task Name, Details</strong></li>
-                          <li><strong>Start Week:</strong> 1-{projectWeeks}</li>
-                          <li><strong>Duration & Type:</strong> weeks or days</li>
-                          <li><strong>Exact Date Required:</strong> Yes/No</li>
-                          <li><strong>Task Type:</strong> Build, Testing, Training, Planning, Milestone</li>
-                        </ul>
-                      </div>
-                      <button onClick={downloadTemplate} 
-                        className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors">
-                        ⬇️ Download Template
-                      </button>
-                    </div>
-                  )}
+      rows.push([]);
+    });
 
-                  {step === 2 && (
-                    <div className="text-center space-y-6">
-                      <h2 className="text-2xl font-bold text-gray-800">Upload Your Data</h2>
-                      <div className="text-6xl">📤</div>
-                      <div className="flex flex-col gap-4 items-center">
-                        <button onClick={() => fileInputRef.current?.click()}
-                          className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors">
-                          📊 Upload Task Spreadsheet
-                        </button>
-                        <button onClick={() => document.getElementById('jsonUpload')?.click()}
-                          className="flex items-center gap-2 bg-gray-600 text-white px-6 py-3 rounded-lg hover:bg-gray-700 transition-colors">
-                          📁 Load Saved Project
-                        </button>
-                      </div>
-                      <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleFileUpload} className="hidden" />
-                      <input id="jsonUpload" type="file" accept=".json" onChange={loadProgress} className="hidden" />
-                      <div className="bg-blue-50 p-4 rounded-lg text-left">
-                        <h4 className="font-semibold text-blue-900 mb-2">How to Load Saved Project:</h4>
-                        <ol className="text-sm text-blue-800 list-decimal list-inside space-y-1">
-                          <li>Click "Load Saved Project"</li>
-                          <li>Select your .json file</li>
-                          <li>Continue editing</li>
-                        </ol>
-                      </div>
-                    </div>
-                  )}
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [
+    {wch:30},{wch:14},{wch:12},{wch:12},
+    {wch:14},{wch:12},{wch:40}
+  ];
+  ws['!freeze'] = { ySplit: 6 };
 
-                  {step === 3 && (
-                    <div className="space-y-6">
-                      <h2 className="text-2xl font-bold text-gray-800">Project Details</h2>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Project Name</label>
-                        <input type="text" value={projectName} onChange={(e) => setProjectName(e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Go-Live Date</label>
-                        <input type="date" value={goLiveDate} onChange={(e) => setGoLiveDate(e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Project Duration (Weeks)</label>
-                        <input type="number" value={projectWeeks} onChange={(e) => setProjectWeeks(parseInt(e.target.value) || 18)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" min="1" />
-                      </div>
-                      {projectStartDate && (
-                        <div className="p-4 bg-blue-50 rounded-lg">
-                          <p className="text-sm text-blue-900">
-                            <strong>Project Start:</strong> {projectStartDate.toLocaleDateString('en-US', 
-                              { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
+  XLSX.utils.book_append_sheet(wb, ws, 'Project Tracker');
+  XLSX.writeFile(wb, `${projectName || 'project'}_tracker.xlsx`);
+}
 
-                  {step === 4 && (
-                    <div className="space-y-6">
-                      <h2 className="text-2xl font-bold text-gray-800">Review and Edit Tasks</h2>
-                      {Object.entries(groupTasksByWeek()).sort(([a], [b]) => parseInt(a) - parseInt(b)).map(([week, weekTasks]) => (
-                        <div key={week} className="bg-gray-50 rounded-lg p-4">
-                          <h3 className="text-lg font-semibold mb-3">Week {week}
-                            {getMondayOfWeek(parseInt(week)) && 
-                              ` - ${getMondayOfWeek(parseInt(week)).toLocaleDateString()}`}
-                          </h3>
-                          {weekTasks.map(t => (
-                            <div key={t.id} className="bg-white p-4 rounded-lg mb-3 shadow-sm">
-                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-                                <input type="text" placeholder="Task Name" value={t.name}
-                                  onChange={(e) => updateTask(t.id, 'name', e.target.value)}
-                                  className="px-3 py-2 border rounded text-sm focus:ring-2 focus:ring-blue-500" />
-                                <select value={t.taskType} onChange={(e) => updateTask(t.id, 'taskType', e.target.value)}
-                                  className="px-3 py-2 border rounded text-sm focus:ring-2 focus:ring-blue-500">
-                                  {taskTypes.map(type => <option key={type}>{type}</option>)}
-                                </select>
-                                <input type="text" placeholder="Owner" value={t.owner}
-                                  onChange={(e) => updateTask(t.id, 'owner', e.target.value)}
-                                  className="px-3 py-2 border rounded text-sm focus:ring-2 focus:ring-blue-500" />
-                                <select value={t.status} onChange={(e) => updateTask(t.id, 'status', e.target.value)}
-                                  className="px-3 py-2 border rounded text-sm focus:ring-2 focus:ring-blue-500">
-                                  <option>Not Started</option>
-                                  <option>In Progress</option>
-                                  <option>Complete</option>
-                                </select>
-                                <input type="number" placeholder="% Complete" value={t.percentComplete}
-                                  onChange={(e) => updateTask(t.id, 'percentComplete', parseInt(e.target.value) || 0)}
-                                  className="px-3 py-2 border rounded text-sm focus:ring-2 focus:ring-blue-500" min="0" max="100" />
-                                <input type="number" placeholder="Duration" value={t.duration}
-                                  onChange={(e) => updateTask(t.id, 'duration', parseFloat(e.target.value) || 1)}
-                                  className="px-3 py-2 border rounded text-sm focus:ring-2 focus:ring-blue-500" />
-                                <select value={t.durationType} onChange={(e) => updateTask(t.id, 'durationType', e.target.value)}
-                                  className="px-3 py-2 border rounded text-sm focus:ring-2 focus:ring-blue-500">
-                                  <option value="days">days</option>
-                                  <option value="weeks">weeks</option>
-                                </select>
-                                {t.exactDateRequired && (
-                                  <input type="date" value={t.specificDate || ''}
-                                    onChange={(e) => {
-                                      const sel = new Date(e.target.value);
-                                      const ws = getMondayOfWeek(t.startWeek);
-                                      const we = calculateEndDate(ws, 5, 'days');
-                                      if (sel < ws || sel > we) {
-                                        if (window.confirm(`Date outside Week ${t.startWeek}. Continue?`))
-                                          updateTask(t.id, 'specificDate', e.target.value);
-                                      } else updateTask(t.id, 'specificDate', e.target.value);
-                                    }}
-                                    className="px-3 py-2 border rounded text-sm focus:ring-2 focus:ring-blue-500" />
-                                )}
-                              </div>
-                              <textarea placeholder="Details" value={t.details}
-                                onChange={(e) => updateTask(t.id, 'details', e.target.value)}
-                                className="w-full px-3 py-2 border rounded text-sm mb-2 focus:ring-2 focus:ring-blue-500" rows="2" />
-                              <textarea placeholder="Notes" value={t.notes}
-                                onChange={(e) => updateTask(t.id, 'notes', e.target.value)}
-                                className="w-full px-3 py-2 border rounded text-sm mb-2 focus:ring-2 focus:ring-blue-500" rows="2" />
-                              <button onClick={() => deleteTask(t.id)}
-                                className="text-red-600 text-sm hover:text-red-800 flex items-center gap-1">
-                                🗑️ Delete
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                      <button onClick={addTask}
-                        className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
-                        ➕ Add Task
-                      </button>
-                    </div>
-                  )}
+/* ============================================================
+   REACT APP
+============================================================ */
+function App() {
+  const { useState } = React;
+  const [step,setStep]=useState(1);
+  const [projectName,setProjectName]=useState('');
+  const [goLiveDate,setGoLiveDate]=useState('');
+  const [projectWeeks,setProjectWeeks]=useState(18);
+  const [tasks,setTasks]=useState([]);
 
-                  {step === 5 && (
-                    <div className="space-y-6">
-                      <h2 className="text-2xl font-bold text-gray-800">Calendar View</h2>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Filter by Task Type</label>
-                        <select value={calendarFilter} onChange={(e) => setCalendarFilter(e.target.value)}
-                          className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
-                          <option value="all">All Tasks</option>
-                          {taskTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                      </div>
-                      <div className="max-h-screen overflow-y-auto">{renderCalendar()}</div>
-                    </div>
-                  )}
+  function addTask(){
+    setTasks(t=>[...t,{
+      id:crypto.randomUUID(),
+      name:'',details:'',startWeek:1,
+      duration:1,durationUnit:'Weeks',
+      exactDateRequired:false,specificDate:'',
+      taskType:'Build',notes:'',
+      owner:'',status:'Not Started',percentComplete:0
+    }]);
+  }
 
-                  {step === 6 && (
-                    <div className="text-center space-y-6">
-                      <h2 className="text-2xl font-bold text-gray-800">Export Project</h2>
-                      <p className="text-gray-600">Your project is ready to export!</p>
-                      <button onClick={exportToExcel}
-                        className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors mx-auto">
-                        📊 Export to Excel
-                      </button>
-                      <div className="bg-blue-50 p-4 rounded-lg text-left">
-                        <h4 className="font-semibold text-blue-900 mb-2">Excel Tracker Includes:</h4>
-                        <ul className="text-sm text-blue-800 space-y-1">
-                          <li>• Task Tracker with all details</li>
-                          <li>• Gantt Chart visualization</li>
-                          <li>• Status tracking (Not Started/In Progress/Complete)</li>
-                        </ul>
-                      </div>
-                    </div>
-                  )}
+  function loadExcel(e){
+    const r=new FileReader();
+    r.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:'array'});
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      setTasks(rows.map(r=>({
+        id:crypto.randomUUID(),
+        name:r['Task Name']||'',
+        details:r['Task Details']||'',
+        startWeek:Number(r['Start Week'])||1,
+        duration:Number(r['Duration'])||1,
+        durationUnit:r['Duration Unit']||'Weeks',
+        exactDateRequired:r['Exact Date Required']==='Yes',
+        specificDate:r['Specific Date']||'',
+        taskType:r['Task Type']||'Build',
+        notes:r['Notes']||'',
+        owner:'',status:'Not Started',percentComplete:0
+      })));
+      setStep(3);
+    };
+    r.readAsArrayBuffer(e.target.files[0]);
+  }
 
-                  <div className="flex justify-between mt-8 pt-6 border-t">
-                    <button onClick={() => setStep(Math.max(1, step - 1))} disabled={step === 1}
-                      className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                      ◀️ Previous
-                    </button>
-                    <button onClick={() => setStep(Math.min(6, step + 1))} disabled={step === 6 || (step === 2 && tasks.length === 0)}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                      Next ▶️
-                    </button>
-                  </div>
-                </div>
-              </div>
+  return (
+    <div className="max-w-7xl mx-auto p-6">
+      <div className="bg-white p-6 rounded-xl shadow">
+        <h1 className="text-3xl font-bold mb-4">Project Planning Tool</h1>
+
+        {step===1&&(
+          <>
+            <button onClick={downloadTemplate}
+              className="bg-blue-600 text-white px-5 py-3 rounded">
+              Download Excel Template
+            </button>
+            <button onClick={()=>setStep(2)}
+              className="ml-4 bg-gray-700 text-white px-5 py-3 rounded">
+              Next
+            </button>
+          </>
+        )}
+
+        {step===2&&(
+          <input type="file" accept=".xlsx" onChange={loadExcel}/>
+        )}
+
+        {step===3&&(
+          <>
+            <div className="grid grid-cols-3 gap-4 mb-4">
+              <input className="border p-2" placeholder="Project Name"
+                value={projectName} onChange={e=>setProjectName(e.target.value)}/>
+              <input type="date" className="border p-2"
+                value={goLiveDate} onChange={e=>setGoLiveDate(e.target.value)}/>
+              <input type="number" className="border p-2"
+                value={projectWeeks} onChange={e=>setProjectWeeks(+e.target.value)}/>
             </div>
-          );
-        };
 
-        ReactDOM.render(<ProjectPlannerTool />, document.getElementById('root'));
-    </script>
+            {tasks.map(t=>(
+              <div key={t.id} className="grid grid-cols-6 gap-2 mb-2">
+                <input className="border p-1" value={t.name}
+                  onChange={e=>t.name=e.target.value&&setTasks([...tasks])}/>
+                <select className="border p-1" value={t.taskType}
+                  onChange={e=>t.taskType=e.target.value&&setTasks([...tasks])}>
+                  {TASK_TYPES.map(x=><option key={x}>{x}</option>)}
+                </select>
+                <input type="number" className="border p-1" value={t.startWeek}
+                  onChange={e=>t.startWeek=+e.target.value&&setTasks([...tasks])}/>
+                <input type="number" className="border p-1" value={t.duration}
+                  onChange={e=>t.duration=+e.target.value&&setTasks([...tasks])}/>
+                <select className="border p-1" value={t.durationUnit}
+                  onChange={e=>t.durationUnit=e.target.value&&setTasks([...tasks])}>
+                  {DURATION_UNITS.map(x=><option key={x}>{x}</option>)}
+                </select>
+                <button onClick={()=>setTasks(tasks.filter(x=>x!==t))}
+                  className="text-red-600">✕</button>
+              </div>
+            ))}
+
+            <button onClick={addTask}
+              className="bg-green-600 text-white px-4 py-2 rounded mt-2">
+              Add Task
+            </button>
+
+            <button onClick={()=>exportExcel({projectName,goLiveDate,projectWeeks,tasks})}
+              className="ml-4 bg-blue-700 text-white px-4 py-2 rounded mt-2">
+              Export to Excel
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById('root'));
+</script>
 </body>
 </html>
