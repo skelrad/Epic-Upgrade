@@ -72,40 +72,116 @@ function calculateEndDate(start, duration, unit) {
 function downloadTemplate() {
   const wb = XLSX.utils.book_new();
 
+  /* ==========================
+     LISTS (hidden)
+  ========================== */
   const lists = XLSX.utils.aoa_to_sheet([
-    ['TaskTypes', ...TASK_TYPES],
-    ['DurationUnits', ...DURATION_UNITS],
+    ['TaskTypes', 'Build', 'Testing', 'Training', 'Planning', 'Milestone'],
+    ['DurationUnits', 'Days', 'Weeks'],
     ['YesNo', 'Yes', 'No']
   ]);
   lists['!hidden'] = 1;
   XLSX.utils.book_append_sheet(wb, lists, 'Lists');
 
+  /* ==========================
+     TASK SHEET
+  ========================== */
+  const headerRow = [
+    'Task Name',
+    'Task Details',
+    'Start Week',
+    'Duration',
+    'Duration Unit',
+    'Exact Date Required',
+    'Specific Date (UI Only)',
+    'Task Type',
+    'Notes'
+  ];
+
   const ws = XLSX.utils.aoa_to_sheet([
-    ['Project Planning Input Template'],
+    ['PROJECT TASK INTAKE TEMPLATE'],
     [],
-    ['Instructions:'],
-    ['• One task per row'],
-    ['• Do not rename columns'],
+    ['Instructions'],
+    ['• Enter ONE task per row'],
+    ['• Do NOT rename or reorder columns'],
     ['• Use dropdowns only'],
+    ['• If “Exact Date Required” = Yes, enter the date later in the Web UI'],
     [],
-    [
-      'Task Name','Task Details','Start Week','Duration',
-      'Duration Unit','Exact Date Required','Specific Date',
-      'Task Type','Notes'
-    ]
+    headerRow
   ]);
 
-  ws['!freeze'] = { ySplit: 8 };
-  ws['!cols'] = [
-    {wch:28},{wch:40},{wch:12},{wch:10},
-    {wch:14},{wch:20},{wch:14},{wch:16},{wch:30}
+  /* ==========================
+     STYLING
+  ========================== */
+  const headerFill = { fgColor: { rgb: 'E5F0FF' } };
+
+  headerRow.forEach((_, idx) => {
+    const cell = XLSX.utils.encode_cell({ r: 8, c: idx });
+    ws[cell].s = {
+      font: { bold: true },
+      alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+      fill: headerFill,
+      border: {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' }
+      }
+    };
+  });
+
+  ws['!rows'] = [
+    { hpt: 28 }, {}, {}, {}, {}, {}, {}, {},
+    { hpt: 32 }
   ];
 
-  ws['!dataValidation'] = [
-    { type:'list', sqref:'E9:E500', formula1:'=Lists!$B$2:$C$2' },
-    { type:'list', sqref:'F9:F500', formula1:'=Lists!$B$3:$C$3' },
-    { type:'list', sqref:'H9:H500', formula1:'=Lists!$B$1:$F$1' }
+  ws['!cols'] = [
+    { wch: 28 }, // Task Name
+    { wch: 42 }, // Details
+    { wch: 12 }, // Start Week
+    { wch: 10 }, // Duration
+    { wch: 14 }, // Duration Unit
+    { wch: 20 }, // Exact Date Required
+    { wch: 22 }, // Specific Date
+    { wch: 16 }, // Task Type
+    { wch: 32 }  // Notes
   ];
+
+  ws['!freeze'] = { ySplit: 9 };
+
+  /* ==========================
+     DATA VALIDATION (Dropdowns)
+  ========================== */
+  ws['!dataValidation'] = [
+    {
+      type: 'list',
+      allowBlank: true,
+      sqref: 'E10:E1000',
+      formula1: '=Lists!$B$2:$C$2'
+    },
+    {
+      type: 'list',
+      allowBlank: true,
+      sqref: 'F10:F1000',
+      formula1: '=Lists!$B$3:$C$3'
+    },
+    {
+      type: 'list',
+      allowBlank: true,
+      sqref: 'H10:H1000',
+      formula1: '=Lists!$B$1:$F$1'
+    }
+  ];
+
+  /* ==========================
+     LOCK SPECIFIC DATE COLUMN
+  ========================== */
+  for (let r = 9; r < 1000; r++) {
+    const cell = XLSX.utils.encode_cell({ r, c: 6 });
+    ws[cell] = ws[cell] || { t: 's', v: '' };
+    ws[cell].s = {
+      fill: { fgColor: { rgb: 'F2F2F2' } },
+      font: { italic: true, color: { rgb: '666666' } }
+    };
+  }
 
   XLSX.utils.book_append_sheet(wb, ws, 'Tasks');
   XLSX.writeFile(wb, 'project_tasks_template.xlsx');
@@ -295,3 +371,4 @@ ReactDOM.render(<App />, document.getElementById('root'));
 </script>
 </body>
 </html>
+
